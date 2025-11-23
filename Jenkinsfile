@@ -9,8 +9,9 @@ pipeline {
     }
 
     environment {
-        DOCKER_REPO = 'sohail28/python-web-app'
-        DOCKER_CREDENTIALS = 'docker-hub-creds'
+        DOCKER_REPO = "sohail28/python-web-app"
+        DOCKER_CREDENTIALS = "docker-hub-creds"
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -21,54 +22,50 @@ pipeline {
             }
         }
 
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                python3 -m venv venv
-                venv/bin/pip install --upgrade pip
-                venv/bin/pip install -r requirements.txt
-                '''
-            }
-        }
-
-        stage('Run Unit Tests') {
-            steps {
-                sh '''
-                venv/bin/pip install pytest
-                venv/bin/pytest tests/
-                '''
-            }
-        }
-
-        stage('Static Code Analysis') {
-            steps {
-                sh '''
-                venv/bin/pip install flake8
-                venv/bin/flake8 app/
-                '''
-            }
-        }
-
-        stage('Docker Build') {
+        stage('Install Dependencies & Test') {
             steps {
                 script {
-                    def tag = BUILD_NUMBER
-                    def image = "${DOCKER_REPO}:${tag}"
-                    env.DEPLOY_IMAGE = image
-                    docker.build(image)
-                }
-            }
-        }
+                    docker.image('python:3.11-slim').inside {
+                        sh '''
+                        pip install --upgrade pip
+                        pip install -r requirements.txt
+                        pip install pytest flake8
 
-        stage('Docker Push') {
-            steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
-                        docker.image(env.DEPLOY_IMAGE).push()
+                        echo "Running Unit Tests..."
+                        pytest tests/
+
+                        echo "Running Code Quality Checks..."
+                        flake8 app/
+                        '''
                     }
                 }
             }
         }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh """
+                    docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
+                    docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
+                    """
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
+                        sh """
+                        docker push ${DOCKER_REPO}:${IMAGE_TAG}
+                        docker push ${DOCKER_REPO}:latest
+                        """
+                    }
+                }
+            }
+        }
+
     }
 
     post {
@@ -76,10 +73,10 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "✅ Python CI/CD Pipeline Completed Successfully"
+            echo "✅ Enterprise CI/CD Pipeline Completed Successfully"
         }
         failure {
-            echo "❌ Pipeline Failed - Fix Required"
+            echo "❌ Pipeline Failed - Please Check Logs"
         }
     }
 }
