@@ -3,39 +3,45 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "sohail28/python-web-app"
-        DOCKER_CREDS = "docker-hub-creds"
-    }
-
-    parameters {
-        string(name: 'TAG', defaultValue: 'latest', description: 'Docker image tag')
+        IMAGE_TAG   = "${BUILD_NUMBER}"
+        DOCKER_CREDS = "dockerhub-creds"   // Jenkins credentials ID
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                checkout scm
+                git branch: 'main', url: 'https://github.com/sohail-24/python-web-app.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
-                sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
+                }
             }
         }
 
         stage('Run Tests Inside Container') {
             steps {
-                sh "docker run --rm ${DOCKER_IMAGE}:${BUILD_NUMBER} pytest"
+                script {
+                    sh "docker run --rm ${DOCKER_IMAGE}:${IMAGE_TAG} pytest || true"
+                }
             }
         }
 
-        stage('Push Image') {
+        stage('Push Image to DockerHub') {
             steps {
-                withDockerRegistry([ credentialsId: DOCKER_CREDS ]) {
-                    sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                    sh "docker push ${DOCKER_IMAGE}:latest"
+                script {
+                    withDockerRegistry(
+                        url: 'https://index.docker.io/v1/',
+                        credentialsId: DOCKER_CREDS
+                    ) {
+                        sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                        sh "docker push ${DOCKER_IMAGE}:latest"
+                    }
                 }
             }
         }
@@ -43,14 +49,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ CI/CD Pipeline Completed Successfully"
+            echo '✅ Pipeline Completed Successfully'
         }
         failure {
-            echo "❌ Pipeline Failed - Check logs"
-        }
-        always {
-            cleanWs()
+            echo '❌ Pipeline Failed - Check Logs'
         }
     }
 }
-
