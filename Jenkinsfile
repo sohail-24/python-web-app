@@ -4,7 +4,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = "sohail28/python-web-app"
         IMAGE_TAG   = "${BUILD_NUMBER}"
-        DOCKER_CREDS = "dockerhub-creds"   // Jenkins credentials ID
+        DOCKER_CREDS = "docker-hub-creds"   // Jenkins credentials ID
     }
 
     stages {
