@@ -2,15 +2,15 @@ pipeline {
     agent any
 
     options {
-        timestamps()
-        disableConcurrentBuilds()
+        timeout(time: 1, unit: 'HOURS')
         buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+        timestamps()
     }
 
     environment {
-        APP_NAME = "python-web-app"
-        DOCKER_IMAGE = "sohail28/python-web-app"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        DOCKER_REPO = 'sohail28/python-web-app'
+        DOCKER_CREDENTIALS = 'docker-hub-creds'
     }
 
     stages {
@@ -24,10 +24,18 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 sh '''
-                  python3 -m venv venv
-                  . venv/bin/activate
-                  pip install --upgrade pip
-                  pip install -r requirements.txt
+                python3 -m venv venv
+                venv/bin/pip install --upgrade pip
+                venv/bin/pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Unit Tests') {
+            steps {
+                sh '''
+                venv/bin/pip install pytest
+                venv/bin/pytest tests/
                 '''
             }
         }
@@ -35,59 +43,43 @@ pipeline {
         stage('Static Code Analysis') {
             steps {
                 sh '''
-                  . venv/bin/activate
-                  pip install pylint bandit
-                  pylint app.py || true
-                  bandit -r . || true
+                venv/bin/pip install flake8
+                venv/bin/flake8 app/
                 '''
             }
         }
 
-        stage('Unit Testing') {
+        stage('Docker Build') {
             steps {
-                sh '''
-                  . venv/bin/activate
-                  pip install pytest
-                  pytest
-                '''
+                script {
+                    def tag = BUILD_NUMBER
+                    def image = "${DOCKER_REPO}:${tag}"
+                    env.DEPLOY_IMAGE = image
+                    docker.build(image)
+                }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Docker Push') {
             steps {
-                sh '''
-                  docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} .
-                  docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest
-                '''
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-hub-creds',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''
-                      echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                      docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
-                      docker push ${DOCKER_IMAGE}:latest
-                    '''
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
+                        docker.image(env.DEPLOY_IMAGE).push()
+                    }
                 }
             }
         }
     }
 
     post {
-        success {
-            echo "✅ Python CI/CD Pipeline Successful"
-        }
-        failure {
-            echo "❌ Build Failed - Check Logs"
-        }
         always {
             cleanWs()
+        }
+        success {
+            echo "✅ Python CI/CD Pipeline Completed Successfully"
+        }
+        failure {
+            echo "❌ Pipeline Failed - Fix Required"
         }
     }
 }
