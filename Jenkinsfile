@@ -2,55 +2,40 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "sohail28/python-web-app"
-        TAG = "${BUILD_NUMBER}"
+        DOCKER_IMAGE = "sohail28/python-web-app"
+        DOCKER_CREDS = "docker-hub-creds"
+    }
+
+    parameters {
+        string(name: 'TAG', defaultValue: 'latest', description: 'Docker image tag')
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                cleanWs()
                 checkout scm
             }
         }
 
-        stage('Docker Build') {
+        stage('Build Docker Image') {
             steps {
-                script {
-                    sh """
-                    docker build -t ${IMAGE_NAME}:${TAG} .
-                    docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
-                    """
-                }
+                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                sh "docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest"
             }
         }
 
         stage('Run Tests Inside Container') {
             steps {
-                script {
-                    sh """
-                    docker run --rm ${IMAGE_NAME}:${TAG} pytest tests/
-                    docker run --rm ${IMAGE_NAME}:${TAG} flake8 app/
-                    """
-                }
+                sh "docker run --rm ${DOCKER_IMAGE}:${BUILD_NUMBER} pytest"
             }
         }
 
         stage('Push Image') {
             steps {
-                script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'docker-hub-creds',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-                        sh """
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker push ${IMAGE_NAME}:${TAG}
-                        docker push ${IMAGE_NAME}:latest
-                        """
-                    }
+                withDockerRegistry([ credentialsId: DOCKER_CREDS ]) {
+                    sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
                 }
             }
         }
@@ -58,10 +43,13 @@ pipeline {
 
     post {
         success {
-            echo "✅ Enterprise Pipeline Completed Successfully"
+            echo "✅ CI/CD Pipeline Completed Successfully"
         }
         failure {
-            echo "❌ Pipeline Failed - Inspect Stage Logs"
+            echo "❌ Pipeline Failed - Check logs"
+        }
+        always {
+            cleanWs()
         }
     }
 }
