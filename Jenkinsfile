@@ -1,82 +1,67 @@
 pipeline {
     agent any
 
-    options {
-        timeout(time: 1, unit: 'HOURS')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-        timestamps()
-    }
-
     environment {
-        DOCKER_REPO = "sohail28/python-web-app"
-        DOCKER_CREDENTIALS = "docker-hub-creds"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_NAME = "sohail28/python-web-app"
+        TAG = "${BUILD_NUMBER}"
     }
 
     stages {
 
-        stage('Checkout Source') {
+        stage('Checkout Code') {
             steps {
+                cleanWs()
                 checkout scm
             }
         }
 
-        stage('Install Dependencies & Test') {
-            steps {
-                script {
-                    docker.image('python:3.11-slim').inside {
-                        sh '''
-                        pip install --upgrade pip
-                        pip install -r requirements.txt
-                        pip install pytest flake8
-
-                        echo "Running Unit Tests..."
-                        pytest tests/
-
-                        echo "Running Code Quality Checks..."
-                        flake8 app/
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('Build Docker Image') {
+        stage('Docker Build') {
             steps {
                 script {
                     sh """
-                    docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
-                    docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
+                    docker build -t ${IMAGE_NAME}:${TAG} .
+                    docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
                     """
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Run Tests Inside Container') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
+                    sh """
+                    docker run --rm ${IMAGE_NAME}:${TAG} pytest tests/
+                    docker run --rm ${IMAGE_NAME}:${TAG} flake8 app/
+                    """
+                }
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(
+                        credentialsId: 'docker-hub-creds',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
                         sh """
-                        docker push ${DOCKER_REPO}:${IMAGE_TAG}
-                        docker push ${DOCKER_REPO}:latest
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push ${IMAGE_NAME}:${TAG}
+                        docker push ${IMAGE_NAME}:latest
                         """
                     }
                 }
             }
         }
-
     }
 
     post {
-        always {
-            cleanWs()
-        }
         success {
-            echo "✅ Enterprise CI/CD Pipeline Completed Successfully"
+            echo "✅ Enterprise Pipeline Completed Successfully"
         }
         failure {
-            echo "❌ Pipeline Failed - Please Check Logs"
+            echo "❌ Pipeline Failed - Inspect Stage Logs"
         }
     }
 }
